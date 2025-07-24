@@ -1,28 +1,28 @@
 # newsboat-summarize
 
-LLM-powered content summarization for newsboat RSS reader.
+LLM-powered content summarization for [newsboat RSS reader](https://github.com/newsboat/newsboat).
 
-## INSTALL
+## Install
 
 ```bash
 ./install.sh
 ```
 
-## USAGE
+## Usage
 
 1. Open newsboat
 2. Navigate to article/video
 3. Press `,m` to summarize
-4. Browser opens with provider's chat
+4. Browser opens with LMM provider's chat
 5. Paste content (Cmd+V/Ctrl+V)
 
-## SUPPORTED
+## Supported
 
 - Web articles (via curl/lynx)
 - YouTube videos (transcript)
 - AI providers: Claude, ChatGPT, Grok
 
-## CONFIG
+## Config
 
 Edit `~/.newsboat/summarize.conf`:
 ```bash
@@ -31,20 +31,20 @@ BROWSER_CMD="open"    # browser command
 CUSTOM_PROMPT="..."   # override default prompt
 ```
 
-## DEPENDENCIES
+## Dependencies
 
 - python3, pip
 - youtube-transcript-api
 - curl or lynx
 - newsboat
 
-## UNINSTALL
+## Uninstall
 
 ```bash
 ./uninstall.sh
 ```
 
-## FILES
+## Files
 
 ```
 newsboat-summarize    # main script
@@ -52,3 +52,6 @@ summarize.conf       # configuration
 install.sh           # installer
 uninstall.sh         # uninstaller
 ```
+## License
+
+[MIT](https://opensource.org/license/MIT)
