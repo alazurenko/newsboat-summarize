@@ -1,0 +1,193 @@
+#!/bin/bash
+#
+# Newsboat AI Summarization Script
+# ================================
+# 
+# Extracts content from articles or YouTube videos and prepares it for
+# AI summarization. Content is copied to clipboard and AI chat interface
+# is opened automatically.
+#
+# Usage: newsboat-summarize <URL>
+# 
+# Supported URLs:
+# - Web articles (any HTTP/HTTPS URL)
+# - YouTube videos (youtube.com, youtu.be)
+#
+# Dependencies:
+# - curl or lynx (for article extraction)
+# - youtube-transcript-api (for YouTube transcripts)
+# - pbcopy/xclip/xsel (for clipboard operations)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/summarize.conf"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
+}
+
+error_exit() {
+    log "ERROR: $1"
+    exit 1
+}
+
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        source "$CONFIG_FILE"
+    else
+        log "Config file not found, using defaults"
+        PROVIDER="claude"
+        BROWSER_CMD="open"
+    fi
+}
+
+
+is_youtube_url() {
+    [[ "$1" =~ ^https?://(www\.)?(youtube\.com/watch|youtu\.be/) ]]
+}
+
+extract_youtube_id() {
+    local url="$1"
+    if [[ "$url" =~ youtube\.com/watch.*v=([^&]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ youtu\.be/([^?]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    else
+        error_exit "Could not extract YouTube video ID from: $url"
+    fi
+}
+
+get_youtube_transcript() {
+    local video_id="$1"
+    log "Extracting transcript for YouTube video: $video_id"
+    
+    # Add user's Python bin to PATH if it exists (common pip --user location)
+    local python_bin_paths=(
+        "$HOME/Library/Python/3.13/bin"
+        "$HOME/Library/Python/3.12/bin"
+        "$HOME/.local/bin"
+    )
+    
+    for bin_path in "${python_bin_paths[@]}"; do
+        if [[ -d "$bin_path" ]]; then
+            export PATH="$PATH:$bin_path"
+            break
+        fi
+    done
+    
+    if ! command -v youtube_transcript_api >/dev/null 2>&1; then
+        error_exit "youtube_transcript_api not found. Install with: pip install youtube-transcript-api --user"
+    fi
+    
+    youtube_transcript_api "$video_id" --format text 2>/dev/null || {
+        error_exit "Failed to extract transcript for video: $video_id"
+    }
+}
+
+get_article_content() {
+    local url="$1"
+    log "Extracting article content from: $url"
+    
+    if command -v lynx >/dev/null 2>&1; then
+        lynx -dump -nolist "$url" 2>/dev/null || {
+            error_exit "Failed to extract article content from: $url"
+        }
+    elif command -v curl >/dev/null 2>&1; then
+        curl -s -L "$url" | sed 's/<[^>]*>//g' | sed '/^$/d' 2>/dev/null || {
+            error_exit "Failed to extract article content from: $url"
+        }
+    else
+        error_exit "Neither lynx nor curl found. Install one of them."
+    fi
+}
+
+copy_to_clipboard() {
+    local content="$1"
+    
+    # Try clipboard utilities in order of preference
+    if command -v pbcopy >/dev/null 2>&1; then
+        echo "$content" | pbcopy && log "Content copied to clipboard (macOS)"
+    elif command -v xclip >/dev/null 2>&1; then
+        echo "$content" | xclip -selection clipboard && log "Content copied to clipboard (Linux/xclip)"
+    elif command -v xsel >/dev/null 2>&1; then
+        echo "$content" | xsel --clipboard --input && log "Content copied to clipboard (Linux/xsel)"
+    else
+        log "WARNING: No clipboard utility found. Content not copied."
+        log "Install: macOS=built-in, Linux=xclip or xsel"
+        return 1
+    fi
+}
+
+get_chat_url() {
+    local provider="$1"
+    
+    case "$provider" in
+        "claude")
+            echo "https://claude.ai/chat"
+            ;;
+        "chatgpt")
+            echo "https://chat.openai.com/"
+            ;;  
+        "grok")
+            echo "https://x.ai/grok"
+            ;;
+        *)
+            error_exit "Unknown provider: $provider"
+            ;;
+    esac
+}
+
+open_browser() {
+    local url="$1"
+    local browser_cmd="${BROWSER_CMD:-open}"
+    
+    log "Opening browser with: $browser_cmd"
+    $browser_cmd "$url" || error_exit "Failed to open browser"
+}
+
+main() {
+    if [[ $# -ne 1 ]]; then
+        error_exit "Usage: $0 <URL>"
+    fi
+    
+    local url="$1"
+    load_config
+    
+    local content
+    if is_youtube_url "$url"; then
+        local video_id
+        video_id=$(extract_youtube_id "$url")
+        content=$(get_youtube_transcript "$video_id")
+    else
+        content=$(get_article_content "$url")
+    fi
+    
+    if [[ -z "$content" ]]; then
+        error_exit "No content extracted from: $url"
+    fi
+    
+    # Prepare content with prompt
+    local default_prompt
+    default_prompt="Summarize the following content in 5-10 bullet points with timestamp if it's transcript. "
+    default_prompt+="Instruction: Before responding, make sure to perform a web search to find relevant insights "
+    default_prompt+="Use these insights only when they are directly relevant and meaningfully enhance the response "
+    default_prompt+="by adding clarity, depth, or useful context - do not include them otherwise. "
+    default_prompt+="Be sure to cite any insights used with their corresponding URLs. "
+    default_prompt+="If no relevant insights are found, do not use them"
+    
+    local prompt="${CUSTOM_PROMPT:-$default_prompt}"
+    local full_content="$prompt"$'\n\n'"$content"
+    
+    # Copy to clipboard
+    copy_to_clipboard "$full_content"
+    
+    # Open chat interface
+    local chat_url
+    chat_url=$(get_chat_url "$PROVIDER")
+    
+    open_browser "$chat_url"
+    log "Opened $PROVIDER chat interface. Content ready in clipboard - paste with Cmd+V (macOS) or Ctrl+V (Linux)"
+}
+
+main "$@"
